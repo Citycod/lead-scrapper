@@ -1,0 +1,410 @@
+{
+  "name": "Antigravity Lead Machine — Daily Scan",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Daily 9AM WAT Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Fires daily at 08:00 UTC = 09:00 WAT (UTC+1)"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Configure your niches and locations here\n// ============================================\nconst niches = [\n  'restaurant',\n  'salon',\n  'gym',\n  'hotel',\n  'clinic',\n  'bakery',\n  'pharmacy',\n  'car wash',\n  'laundry',\n  'boutique'\n];\n\nconst locations = ['Abuja', 'Lagos'];\n\n// Build all niche × location combos\nconst combos = [];\nfor (const niche of niches) {\n  for (const location of locations) {\n    combos.push({\n      json: {\n        niche,\n        location,\n        query: `${niche} in ${location}`\n      }\n    });\n  }\n}\n\nreturn combos;"
+      },
+      "id": "a1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Build Niche × Location Combos",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "a1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Loop Through Combos",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "engine",
+              "value": "google_maps"
+            },
+            {
+              "name": "q",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "api_key",
+              "value": "={{ $env.SERPAPI_KEY || 'YOUR_SERPAPI_KEY' }}"
+            },
+            {
+              "name": "ll",
+              "value": "={{ $json.location === 'Abuja' ? '@9.0579,7.4951,15z' : '@6.5244,3.3792,15z' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "a1b2c3d4-0004-4000-8000-000000000004",
+      "name": "SerpApi Google Maps",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 0],
+      "notes": "Calls SerpApi with engine=google_maps. Replace API key in .env"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Extract businesses from SerpApi response\n// and filter for those WITHOUT a website\n// ============================================\nconst input = $input.first().json;\nconst results = input.local_results || input.place_results || [];\nconst niche = $('Loop Through Combos').first().json.niche;\nconst location = $('Loop Through Combos').first().json.location;\n\nconst leads = [];\n\nfor (const biz of results) {\n  // Skip businesses that already have a website\n  if (biz.website) continue;\n\n  const lead = {\n    name: biz.title || biz.name || 'Unknown',\n    phone: biz.phone || 'N/A',\n    address: biz.address || 'N/A',\n    niche: niche,\n    website: '',\n    date: new Date().toISOString().split('T')[0],\n    status: 'New'\n  };\n\n  leads.push({ json: lead });\n}\n\n// If no leads found for this combo, return empty\nif (leads.length === 0) {\n  return [{ json: { _empty: true, niche, location } }];\n}\n\nreturn leads;"
+      },
+      "id": "a1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Extract & Filter No-Website",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-empty",
+              "leftValue": "={{ $json._empty }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notTrue"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Remove Empty Results",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Leads"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Read Existing Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1100, 220],
+      "notes": "Reads existing leads to check for duplicates by phone number"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Deduplicate: remove leads whose phone number\n// already exists in the Google Sheet\n// ============================================\nconst newLeads = $('Remove Empty Results').all();\nconst existingRows = $('Read Existing Leads').all();\n\n// Build a Set of existing phone numbers\nconst existingPhones = new Set();\nfor (const row of existingRows) {\n  if (row.json.Phone) {\n    existingPhones.add(row.json.Phone.toString().trim());\n  }\n}\n\n// Filter out duplicates\nconst uniqueLeads = [];\nfor (const lead of newLeads) {\n  const phone = (lead.json.phone || '').toString().trim();\n  if (phone === 'N/A' || !existingPhones.has(phone)) {\n    uniqueLeads.push(lead);\n    if (phone !== 'N/A') existingPhones.add(phone); // prevent self-dupes in batch\n  }\n}\n\nif (uniqueLeads.length === 0) {\n  return [{ json: { _noNewLeads: true, count: 0 } }];\n}\n\nreturn uniqueLeads;"
+      },
+      "id": "a1b2c3d4-0008-4000-8000-000000000008",
+      "name": "Deduplicate by Phone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-no-new",
+              "leftValue": "={{ $json._noNewLeads }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notTrue"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0009-4000-8000-000000000009",
+      "name": "Has New Leads?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1540, 0]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Name": "={{ $json.name }}",
+            "Phone": "={{ $json.phone }}",
+            "Address": "={{ $json.address }}",
+            "Niche": "={{ $json.niche }}",
+            "Website": "={{ $json.website }}",
+            "Date": "={{ $json.date }}",
+            "Status": "={{ $json.status }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0010-4000-8000-000000000010",
+      "name": "Append to Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1760, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Count how many leads were appended\n// ============================================\nconst items = $input.all();\nconst count = items.length;\nconst today = new Date().toISOString().split('T')[0];\nconst sheetId = $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID';\nconst sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;\n\nreturn [{\n  json: {\n    count,\n    date: today,\n    sheetUrl,\n    message: `🔥 Antigravity Lead Machine — ${today}\\n\\n✅ ${count} new leads found!\\n\\n📊 View sheet: ${sheetUrl}\\n\\n🏙️ Cities: Abuja, Lagos\\n⏰ Next scan: Tomorrow 9:00 AM`\n  }\n}];"
+      },
+      "id": "a1b2c3d4-0011-4000-8000-000000000011",
+      "name": "Build Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1980, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID || 'YOUR_CHAT_ID' }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "a1b2c3d4-0012-4000-8000-000000000012",
+      "name": "Telegram: Daily Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [2200, 0],
+      "notes": "Sends daily lead count + sheet link to your Telegram",
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "path": "lead-scan",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0013-4000-8000-000000000013",
+      "name": "Webhook: Manual Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 220],
+      "notes": "OpenClaw can hit this webhook to trigger a scan on demand"
+    }
+  ],
+  "connections": {
+    "Daily 9AM WAT Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Niche × Location Combos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook: Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Niche × Location Combos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Niche × Location Combos": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Combos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Combos": {
+      "main": [
+        [
+          {
+            "node": "SerpApi Google Maps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SerpApi Google Maps": {
+      "main": [
+        [
+          {
+            "node": "Extract & Filter No-Website",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Filter No-Website": {
+      "main": [
+        [
+          {
+            "node": "Remove Empty Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove Empty Results": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate by Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Existing Leads": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate by Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate by Phone": {
+      "main": [
+        [
+          {
+            "node": "Has New Leads?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Leads?": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Build Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Summary": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Antigravity",
+      "id": "1"
+    },
+    {
+      "name": "Lead Generation",
+      "id": "2"
+    }
+  ],
+  "triggerCount": 2,
+  "updatedAt": "2026-03-23T02:00:00.000Z",
+  "versionId": "1"
+}

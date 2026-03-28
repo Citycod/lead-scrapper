@@ -1,0 +1,143 @@
+# Antigravity Lead Machine — Architecture Overview
+
+This document provides a detailed technical architecture of the **Antigravity Lead Machine**, an automated lead generation system designed to discover businesses without websites and manage them via a lightweight CRM and AI-powered Telegram interface.
+
+---
+
+## 1. High-Level Architecture
+
+The system operates on an orchestrated serverless/self-hosted architecture that relies on **n8n** for workflow automation, **Google Sheets** for database and state management, **SerpApi** for data acquisition, and **OpenClaw AI / Telegram** for user interaction.
+
+```mermaid
+flowchart TD
+    subgraph "Acquisition Layer"
+        SA[SerpApi Google Maps Engine]
+    end
+
+    subgraph "Orchestration Layer"
+        N8N[n8n Automation Engine]
+        N8N_D[Daily Scan Workflow]
+        N8N_W[Weekly Cleanup Workflow]
+        N8N_Wk[Manual Webhook]
+        N8N --- N8N_D
+        N8N --- N8N_W
+        N8N --- N8N_Wk
+    end
+
+    subgraph "Data Layer (CRM)"
+        GS[Google Sheets]
+        LTab[Leads Tab]
+        MTab[Maintenance Clients Tab]
+        GS --- LTab
+        GS --- MTab
+    end
+
+    subgraph "Interface Layer"
+        TG[Telegram Bot]
+        OC[OpenClaw AI Agent]
+        OC_S[lead-engine Skill]
+        SR[simple-responder.mjs]
+        OC --- OC_S
+    end
+
+    %% Connections
+    N8N_D -->|Queries via API| SA
+    SA -->|Returns JSON Results| N8N_D
+    N8N_D -->|Appends New| LTab
+    N8N_W -->|Updates Status| LTab
+    
+    N8N_D -->|Daily Summary| TG
+    N8N_W -->|Weekly Alert| TG
+    
+    TG <-->|Natural Language| OC
+    OC_S <-->|Read/Write| GS
+    OC_S -->|HTTP POST| N8N_Wk
+    TG <-->|Fallback| SR
+    SR -->|HTTP POST| N8N_Wk
+```
+
+---
+
+## 2. Core Components
+
+### A. n8n Automation Engine (Orchestration)
+The system uses n8n (either self-hosted, cloud, or Railway deployed) as the central nervous system. It runs two primary JSON-defined workflows:
+
+1. **Daily Lead Scan ([n8n-workflow.json](file:///c:/Users/HELLO/Desktop/lead%20generation%20system/n8n-workflow.json))**
+   - **Trigger**: Runs automatically via Cron at 9:00 AM WAT daily.
+   - **Logic**: Iterates over a matrix of niches (e.g., *restaurant*, *salon*) and locations (*Abuja*, *Lagos*).
+   - **Data Fetching**: Makes HTTP requests to SerpApi's Google Maps engine to capture local business listings.
+   - **Processing**: Filters out businesses that already have a website. Deduplicates results by checking phone numbers against the existing Google Sheet database.
+   - **Output**: Appends new leads to Google Sheets and dispatches a formatting Telegram notification with a count.
+
+2. **Weekly Stale Cleanup ([n8n-stale-leads.json](file:///c:/Users/HELLO/Desktop/lead%20generation%20system/n8n-stale-leads.json))**
+   - **Trigger**: Runs automatically via Cron at 8:00 AM WAT every Sunday.
+   - **Logic**: Reads all leads in the `Leads` tab where `Status = 'New'`.
+   - **Processing**: Calculates the date delta. If the lead is 7 or more days old, it is flagged as stale.
+   - **Output**: Updates the Google Sheet rows in-place (changing Status to `Stale`) and sends a summary alert to Telegram.
+
+### B. Google Sheets (Data Layer / CRM)
+Rather than a traditional SQL/NoSQL database, the system leverages Google Sheets for ease of use, manual override capabilities, and free-tier accessibility.
+
+- **Leads Tab Schema:**
+  - `Name` (String)
+  - `Phone` (String, used as unique deduplication key)
+  - `Address` (String)
+  - `Niche` (String)
+  - `Website` (String, expected empty for new leads)
+  - `Date` (ISO Date)
+  - `Status` (Enum: `New`, `Contacted`, `Stale`, `Closed`, `Lost`)
+
+- **Maintenance Clients Tab Schema:**
+  - `Name` (String)
+  - `Phone` (String)
+  - `Website URL` (String)
+  - `Plan` (Enum: `Basic`, `Pro`)
+  - `Monthly Fee` (Number/Currency)
+  - `Start Date` (ISO Date)
+  - `Next Renewal` (ISO Date, computed dynamically)
+  - `Status` (Enum: `Active`, `Paused`, `Cancelled`)
+
+### C. OpenClaw AI & Telegram (User Interface)
+The user avoids complex dashboards by interacting directly with a Telegram Bot tied to the OpenClaw AI agent. 
+
+- **The `lead-engine` Skill**: Defined in [skills/lead-engine/SKILL.md](file:///c:/Users/HELLO/Desktop/lead%20generation%20system/skills/lead-engine/SKILL.md). Overrides OpenClaw’s standard behavior to handle domain-specific requests:
+  - **Metrics**: Reads Google Sheets to provide current-day lead counts or list active maintenance renewals.
+  - **State Mutations**: Receives commands like "Mark [name] as contacted" and maps this to an update query on Google Sheets.
+  - **Drafting Outreach**: Leverages AI to generate contextual, friendly WhatsApp/SMS pitches to the leads based on their niche.
+  - **Manual Invocation**: Invokes the n8n webhook (`N8N_WEBHOOK_URL`) if the user requests an immediate scan.
+
+### D. Fallbacks & Utility Scripts
+- **[simple-responder.mjs](file:///c:/Users/HELLO/Desktop/lead%20generation%20system/simple-responder.mjs)**: An emergency Node.js webhook listener. If the AI agent exhausts rate limits, this script intercepts predefined phrases (e.g., "run a scan now", "how many leads today") and returns static replies while triggering the fallback n8n webhooks.
+- **[direct-search.mjs](file:///c:/Users/HELLO/Desktop/lead%20generation%20system/direct-search.mjs)**: A standalone Node.js script enabling hyper-custom searches (different locations/niches) hitting SerpApi directly and persisting to local JSON without involving the n8n scheduler. useful for manual, high-volume geographic scraping.
+
+---
+
+## 3. Data Flow & Lead Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> New: Daily Search
+    New --> Contacted: User commands OpenClaw
+    New --> Stale: Weekly automated cron
+    
+    Contacted --> Closed: Successful pitch
+    Contacted --> Lost: Unsuccessful pitch
+    Stale --> Contacted: User revisits lead
+    
+    Closed --> Maintenance: User provisions service
+    
+    state Maintenance {
+        Active
+        Paused
+        Cancelled
+    }
+```
+
+## 4. Environment & Security
+- **OAuth / Service Accounts**: Connects n8n to Google Sheets via standard Google Cloud OAuth 2.0. Credentials stored natively and securely within the n8n vault.
+- **Agent Sandbox**: The OpenClaw integration operates exclusively inside its workspace sandbox and uses the `TELEGRAM_BOT_TOKEN` for I/O.
+- **Configuration**: Critical environment variables include `SERPAPI_KEY`, `GOOGLE_SHEET_ID`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`.
+
+---
+*End of Documentation*

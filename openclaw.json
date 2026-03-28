@@ -1,0 +1,22 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "google/gemini-2.0-flash"
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "8520889170:AAGsXt_r0ghlqgzqmI6mPsHo6Y3hVpId3yk"
+    }
+  },
+  "gateway": {
+    "mode": "local",
+    "auth": {
+      "mode": "token",
+      "token": "fdd6922157cce239000f198589d16d4544ac37fab67b1752"
+    }
+  }
+}

@@ -1,0 +1,229 @@
+{
+  "name": "Antigravity Lead Machine — Weekly Stale Cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 7,
+              "triggerAtDay": 0
+            }
+          ]
+        }
+      },
+      "id": "b1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Weekly Sunday 8AM WAT",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "notes": "Fires every Sunday at 07:00 UTC = 08:00 WAT"
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Leads"
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0002-4000-8000-000000000002",
+      "name": "Read All Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Find leads that have been \"New\" for 7+ days\n// and mark them as \"Stale\"\n// ============================================\nconst items = $input.all();\nconst now = new Date();\nconst STALE_DAYS = 7;\nconst staleLeads = [];\n\nfor (const item of items) {\n  const status = (item.json.Status || '').trim();\n  const dateStr = item.json.Date;\n\n  // Only process leads with \"New\" status\n  if (status !== 'New') continue;\n\n  // Parse the date\n  const leadDate = new Date(dateStr);\n  const daysDiff = Math.floor((now - leadDate) / (1000 * 60 * 60 * 24));\n\n  if (daysDiff >= STALE_DAYS) {\n    staleLeads.push({\n      json: {\n        ...item.json,\n        Status: 'Stale',\n        _rowNumber: item.json.row_number || item.json._rowNumber,\n        _daysSinceCreated: daysDiff\n      }\n    });\n  }\n}\n\nif (staleLeads.length === 0) {\n  return [{ json: { _noStale: true, count: 0 } }];\n}\n\nreturn staleLeads;"
+      },
+      "id": "b1b2c3d4-0003-4000-8000-000000000003",
+      "name": "Find Stale Leads (7+ Days)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "filter-no-stale",
+              "leftValue": "={{ $json._noStale }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notTrue"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b1b2c3d4-0004-4000-8000-000000000004",
+      "name": "Has Stale Leads?",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "list",
+          "value": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Status": "Stale"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        }
+      },
+      "id": "b1b2c3d4-0005-4000-8000-000000000005",
+      "name": "Update Status → Stale",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// Build Telegram alert for stale leads\n// ============================================\nconst items = $input.all();\nconst count = items.length;\nconst sheetId = $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID';\nconst sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;\nconst today = new Date().toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    count,\n    message: `⚠️ Weekly Lead Cleanup — ${today}\\n\\n🕐 ${count} lead(s) marked as Stale\\n(no contact in 7+ days)\\n\\n📊 Review: ${sheetUrl}\\n\\n💡 Tip: Reach out to stale leads or archive them to keep your pipeline clean.`\n  }\n}];"
+      },
+      "id": "b1b2c3d4-0006-4000-8000-000000000006",
+      "name": "Build Stale Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID || 'YOUR_CHAT_ID' }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "b1b2c3d4-0007-4000-8000-000000000007",
+      "name": "Telegram: Stale Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1320, 0],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Sunday 8AM WAT": {
+      "main": [
+        [
+          {
+            "node": "Read All Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read All Leads": {
+      "main": [
+        [
+          {
+            "node": "Find Stale Leads (7+ Days)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Stale Leads (7+ Days)": {
+      "main": [
+        [
+          {
+            "node": "Has Stale Leads?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Stale Leads?": {
+      "main": [
+        [
+          {
+            "node": "Update Status → Stale",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Status → Stale": {
+      "main": [
+        [
+          {
+            "node": "Build Stale Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Stale Alert": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Stale Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Antigravity",
+      "id": "1"
+    },
+    {
+      "name": "Lead Cleanup",
+      "id": "3"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2026-03-23T02:00:00.000Z",
+  "versionId": "1"
+}
