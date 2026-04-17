@@ -1,0 +1,5 @@
+.env
+node_modules/
+search-results.json
+pnpm-debug.log*
+.DS_Store

@@ -16,7 +16,10 @@
       "name": "Weekly Sunday 8AM WAT",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "notes": "Fires every Sunday at 07:00 UTC = 08:00 WAT"
     },
     {
@@ -38,17 +41,24 @@
       "name": "Read All Leads",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Find leads that have been \"New\" for 7+ days\n// and mark them as \"Stale\"\n// ============================================\nconst items = $input.all();\nconst now = new Date();\nconst STALE_DAYS = 7;\nconst staleLeads = [];\n\nfor (const item of items) {\n  const status = (item.json.Status || '').trim();\n  const dateStr = item.json.Date;\n\n  // Only process leads with \"New\" status\n  if (status !== 'New') continue;\n\n  // Parse the date\n  const leadDate = new Date(dateStr);\n  const daysDiff = Math.floor((now - leadDate) / (1000 * 60 * 60 * 24));\n\n  if (daysDiff >= STALE_DAYS) {\n    staleLeads.push({\n      json: {\n        ...item.json,\n        Status: 'Stale',\n        _rowNumber: item.json.row_number || item.json._rowNumber,\n        _daysSinceCreated: daysDiff\n      }\n    });\n  }\n}\n\nif (staleLeads.length === 0) {\n  return [{ json: { _noStale: true, count: 0 } }];\n}\n\nreturn staleLeads;"
+        "language": "python",
+        "pythonCode": "import datetime\nitems = _input.all()\nnow = datetime.datetime.now()\nstale_leads = []\n\nfor item in items:\n  status = str(item.json.get('Status', '')).strip()\n  date_str = item.json.get('Date')\n  \n  if status != 'New':\n    continue\n    \n  try:\n    lead_date = datetime.datetime.strptime(date_str, '%Y-%m-%d')\n    days_diff = (now - lead_date).days\n  except:\n    days_diff = 0\n    \n  if days_diff >= 7:\n    new_json = dict(item.json)\n    new_json['Status'] = 'Stale'\n    new_json['_rowNumber'] = item.json.get('row_number', item.json.get('_rowNumber'))\n    new_json['_daysSinceCreated'] = days_diff\n    stale_leads.append({ \"json\": new_json })\n\nif not stale_leads:\n  return [{ \"json\": { \"_noStale\": True, \"count\": 0 } }]\n\nreturn stale_leads"
       },
       "id": "b1b2c3d4-0003-4000-8000-000000000003",
       "name": "Find Stale Leads (7+ Days)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
@@ -77,7 +87,10 @@
       "name": "Has Stale Leads?",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
-      "position": [660, 0]
+      "position": [
+        660,
+        0
+      ]
     },
     {
       "parameters": {
@@ -106,17 +119,24 @@
       "name": "Update Status → Stale",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [880, 0]
+      "position": [
+        880,
+        0
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Build Telegram alert for stale leads\n// ============================================\nconst items = $input.all();\nconst count = items.length;\nconst sheetId = $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID';\nconst sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;\nconst today = new Date().toISOString().split('T')[0];\n\nreturn [{\n  json: {\n    count,\n    message: `⚠️ Weekly Lead Cleanup — ${today}\\n\\n🕐 ${count} lead(s) marked as Stale\\n(no contact in 7+ days)\\n\\n📊 Review: ${sheetUrl}\\n\\n💡 Tip: Reach out to stale leads or archive them to keep your pipeline clean.`\n  }\n}];"
+        "language": "python",
+        "pythonCode": "import datetime\nitems = _input.all()\ncount = len(items)\nsheet_id = _env.get('GOOGLE_SHEET_ID', 'YOUR_SHEET_ID')\nsheet_url = f\"https://docs.google.com/spreadsheets/d/{sheet_id}/edit\"\ntoday = datetime.datetime.now().strftime('%Y-%m-%d')\n\nmessage = f\"\"\"⚠️ Weekly Lead Cleanup — {today}\\n\\n🕐 {count} lead(s) marked as Stale\\n(no contact in 7+ days)\\n\\n📊 Review: {sheet_url}\\n\\n💡 Tip: Reach out to stale leads or archive them to keep your pipeline clean.\"\"\"\n\nreturn [{\n  \"json\": {\n    \"count\": count,\n    \"message\": message\n  }\n}]"
       },
       "id": "b1b2c3d4-0006-4000-8000-000000000006",
       "name": "Build Stale Alert",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1100, 0]
+      "position": [
+        1100,
+        0
+      ]
     },
     {
       "parameters": {
@@ -130,7 +150,10 @@
       "name": "Telegram: Stale Alert",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [1320, 0],
+      "position": [
+        1320,
+        0
+      ],
       "credentials": {
         "telegramApi": {
           "id": "TELEGRAM_CREDENTIAL_ID",

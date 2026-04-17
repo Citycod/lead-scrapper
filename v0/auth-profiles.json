@@ -1,0 +1,8 @@
+{
+  "google": {
+    "apiKey": "REPLACE_WITH_ENV_VALUE"
+  },
+  "gemini": {
+    "apiKey": "REPLACE_WITH_ENV_VALUE"
+  }
+}

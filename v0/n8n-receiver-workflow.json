@@ -1,0 +1,93 @@
+{
+  "name": "Antigravity Lead Machine — Enrichment Receiver",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "enrich-complete",
+        "options": {}
+      },
+      "id": "receiver-001",
+      "name": "Webhook: Receiver",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "results = _input.first().json.get('results', [])\n\nmessage = \"✅ <b>Lead Enrichment Complete</b>\\n\\n\"\n\nfor i, res in enumerate(results):\n    status_icon = \"🎯\" if res.get('status') == 'success' else \"⚠️\"\n    message += f\"{status_icon} <b>{i+1}. {res.get('name')}</b>\\n\"\n    if res.get('phone'):\n        message += f\"   📞 <code>{res.get('phone')}</code>\\n\"\n    if res.get('email') and res.get('email') != 'None':\n        message += f\"   📧 {res.get('email')}\\n\"\n    if res.get('contactPage'):\n        message += f\"   🔗 <a href='{res.get('contactPage')}'>Contact Page</a>\\n\"\n    elif res.get('website') and res.get('website') != 'None':\n        message += f\"   🌐 <a href='{res.get('website')}'>Website</a>\\n\"\n    message += \"\\n\"\n\nif not results:\n    message += \"No results gathered in this batch.\"\n\nreturn [{ \"json\": { \"message\": message } }]"
+      },
+      "id": "receiver-002",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "receiver-003",
+      "name": "Telegram: Send Enrichment Results",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        440,
+        0
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "TELEGRAM_CREDENTIAL_ID",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook: Receiver": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Send Enrichment Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "Antigravity",
+      "id": "1"
+    }
+  ],
+  "triggerCount": 1,
+  "versionId": "1"
+}

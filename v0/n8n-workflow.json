@@ -15,18 +15,25 @@
       "name": "Daily 9AM WAT Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 0],
+      "position": [
+        0,
+        0
+      ],
       "notes": "Fires daily at 08:00 UTC = 09:00 WAT (UTC+1)"
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Configure your niches and locations here\n// ============================================\nconst niches = [\n  'restaurant',\n  'salon',\n  'gym',\n  'hotel',\n  'clinic',\n  'bakery',\n  'pharmacy',\n  'car wash',\n  'laundry',\n  'boutique'\n];\n\nconst locations = ['Abuja', 'Lagos'];\n\n// Build all niche × location combos\nconst combos = [];\nfor (const niche of niches) {\n  for (const location of locations) {\n    combos.push({\n      json: {\n        niche,\n        location,\n        query: `${niche} in ${location}`\n      }\n    });\n  }\n}\n\nreturn combos;"
+        "language": "python",
+        "pythonCode": "niches = ['restaurant', 'salon', 'gym', 'hotel', 'clinic', 'bakery', 'pharmacy', 'car wash', 'laundry', 'boutique']\nlocations = ['Abuja', 'Lagos']\ncombos = []\nfor niche in niches:\n  for loc in locations:\n    combos.append({\n      \"json\": {\n        \"niche\": niche,\n        \"location\": loc,\n        \"query\": f\"{niche} in {loc}\"\n      }\n    })\nreturn combos"
       },
       "id": "a1b2c3d4-0002-4000-8000-000000000002",
       "name": "Build Niche × Location Combos",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [220, 0]
+      "position": [
+        220,
+        0
+      ]
     },
     {
       "parameters": {
@@ -36,29 +43,34 @@
       "name": "Loop Through Combos",
       "type": "n8n-nodes-base.splitInBatches",
       "typeVersion": 3,
-      "position": [440, 0]
+      "position": [
+        440,
+        0
+      ]
     },
     {
       "parameters": {
-        "url": "https://serpapi.com/search.json",
-        "sendQuery": true,
-        "queryParameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/places",
+        "sendHeaders": true,
+        "headerParameters": {
           "parameters": [
             {
-              "name": "engine",
-              "value": "google_maps"
+              "name": "X-API-KEY",
+              "value": "={{ $env.SERPER_API_KEY || '4aca297c0acbff6fa9d6c89e18395fca6bcc828b' }}"
             },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
             {
               "name": "q",
               "value": "={{ $json.query }}"
-            },
-            {
-              "name": "api_key",
-              "value": "={{ $env.SERPAPI_KEY || 'YOUR_SERPAPI_KEY' }}"
-            },
-            {
-              "name": "ll",
-              "value": "={{ $json.location === 'Abuja' ? '@9.0579,7.4951,15z' : '@6.5244,3.3792,15z' }}"
             }
           ]
         },
@@ -71,21 +83,28 @@
         }
       },
       "id": "a1b2c3d4-0004-4000-8000-000000000004",
-      "name": "SerpApi Google Maps",
+      "name": "Serper Places API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [660, 0],
-      "notes": "Calls SerpApi with engine=google_maps. Replace API key in .env"
+      "position": [
+        660,
+        0
+      ],
+      "notes": "Calls Serper Places API via POST. Replace API key in .env"
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Extract businesses from SerpApi response\n// and filter for those WITHOUT a website\n// ============================================\nconst input = $input.first().json;\nconst results = input.local_results || input.place_results || [];\nconst niche = $('Loop Through Combos').first().json.niche;\nconst location = $('Loop Through Combos').first().json.location;\n\nconst leads = [];\n\nfor (const biz of results) {\n  // Skip businesses that already have a website\n  if (biz.website) continue;\n\n  const lead = {\n    name: biz.title || biz.name || 'Unknown',\n    phone: biz.phone || 'N/A',\n    address: biz.address || 'N/A',\n    niche: niche,\n    website: '',\n    date: new Date().toISOString().split('T')[0],\n    status: 'New'\n  };\n\n  leads.push({ json: lead });\n}\n\n// If no leads found for this combo, return empty\nif (leads.length === 0) {\n  return [{ json: { _empty: true, niche, location } }];\n}\n\nreturn leads;"
+        "language": "python",
+        "pythonCode": "import datetime\ninput_item = _input.first().json\nresults = input_item.get('places', [])\nloop_node = _('Loop Through Combos').first().json\nniche = loop_node.get('niche')\nlocation = loop_node.get('location')\n\nleads = []\nfor biz in results:\n  lead = {\n    \"name\": biz.get('title') or biz.get('name') or 'Unknown',\n    \"phone\": biz.get('phoneNumber') or 'N/A',\n    \"address\": biz.get('address') or 'N/A',\n    \"niche\": niche,\n    \"website\": biz.get('website') or '',\n    \"mapsUrl\": f\"https://www.google.com/maps/place/?q=place_id:{biz.get('cid')}\" if biz.get('cid') else '',\n    \"date\": datetime.datetime.now().strftime('%Y-%m-%d'),\n    \"status\": 'New'\n  }\n  lead['enrichUrl'] = lead['website'] if lead['website'] and len(lead['website']) > 5 else lead['mapsUrl']\n  leads.append({ \"json\": lead })\n\nif not leads:\n  return [{ \"json\": { \"_empty\": True, \"niche\": niche, \"location\": location } }]\n\nreturn leads"
       },
       "id": "a1b2c3d4-0005-4000-8000-000000000005",
-      "name": "Extract & Filter No-Website",
+      "name": "Extract Leads",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [880, 0]
+      "position": [
+        880,
+        0
+      ]
     },
     {
       "parameters": {
@@ -114,7 +133,10 @@
       "name": "Remove Empty Results",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
-      "position": [1100, 0]
+      "position": [
+        1100,
+        0
+      ]
     },
     {
       "parameters": {
@@ -135,18 +157,25 @@
       "name": "Read Existing Leads",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1100, 220],
+      "position": [
+        1100,
+        220
+      ],
       "notes": "Reads existing leads to check for duplicates by phone number"
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Deduplicate: remove leads whose phone number\n// already exists in the Google Sheet\n// ============================================\nconst newLeads = $('Remove Empty Results').all();\nconst existingRows = $('Read Existing Leads').all();\n\n// Build a Set of existing phone numbers\nconst existingPhones = new Set();\nfor (const row of existingRows) {\n  if (row.json.Phone) {\n    existingPhones.add(row.json.Phone.toString().trim());\n  }\n}\n\n// Filter out duplicates\nconst uniqueLeads = [];\nfor (const lead of newLeads) {\n  const phone = (lead.json.phone || '').toString().trim();\n  if (phone === 'N/A' || !existingPhones.has(phone)) {\n    uniqueLeads.push(lead);\n    if (phone !== 'N/A') existingPhones.add(phone); // prevent self-dupes in batch\n  }\n}\n\nif (uniqueLeads.length === 0) {\n  return [{ json: { _noNewLeads: true, count: 0 } }];\n}\n\nreturn uniqueLeads;"
+        "language": "python",
+        "pythonCode": "new_leads = _('Remove Empty Results').all()\nexisting_rows = _('Read Existing Leads').all()\n\nexisting_phones = set()\nfor row in existing_rows:\n  phone = row.json.get('Phone')\n  if phone:\n    existing_phones.add(str(phone).strip())\n\nunique_leads = []\nfor lead in new_leads:\n  phone = str(lead.json.get('phone', '')).strip()\n  if phone == 'N/A' or phone not in existing_phones:\n    unique_leads.append(lead)\n    if phone != 'N/A':\n      existing_phones.add(phone)\n\nif not unique_leads:\n  return [{ \"json\": { \"_noNewLeads\": True, \"count\": 0 } }]\n\nreturn unique_leads"
       },
       "id": "a1b2c3d4-0008-4000-8000-000000000008",
       "name": "Deduplicate by Phone",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1320, 0]
+      "position": [
+        1320,
+        0
+      ]
     },
     {
       "parameters": {
@@ -175,7 +204,10 @@
       "name": "Has New Leads?",
       "type": "n8n-nodes-base.filter",
       "typeVersion": 2,
-      "position": [1540, 0]
+      "position": [
+        1540,
+        0
+      ]
     },
     {
       "parameters": {
@@ -208,17 +240,24 @@
       "name": "Append to Google Sheets",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
-      "position": [1760, 0]
+      "position": [
+        1760,
+        0
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// ============================================\n// Count how many leads were appended\n// ============================================\nconst items = $input.all();\nconst count = items.length;\nconst today = new Date().toISOString().split('T')[0];\nconst sheetId = $env.GOOGLE_SHEET_ID || 'YOUR_SHEET_ID';\nconst sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;\n\nreturn [{\n  json: {\n    count,\n    date: today,\n    sheetUrl,\n    message: `🔥 Antigravity Lead Machine — ${today}\\n\\n✅ ${count} new leads found!\\n\\n📊 View sheet: ${sheetUrl}\\n\\n🏙️ Cities: Abuja, Lagos\\n⏰ Next scan: Tomorrow 9:00 AM`\n  }\n}];"
+        "language": "python",
+        "pythonCode": "import datetime\nitems = _input.all()\ncount = len(items)\ntoday = datetime.datetime.now().strftime('%Y-%m-%d')\nsheet_id = _env.get('GOOGLE_SHEET_ID', 'YOUR_SHEET_ID')\nsheet_url = f\"https://docs.google.com/spreadsheets/d/{sheet_id}/edit\"\n\nmessage = f\"\"\"🔥 Antigravity Lead Machine — {today}\\n\\n✅ {count} new leads found!\\n\\n📊 View sheet: {sheet_url}\\n\\n🏙️ Cities: Abuja, Lagos\\n⏰ Next scan: Tomorrow 9:00 AM\"\"\"\n\nreturn [{\n  \"json\": {\n    \"count\": count,\n    \"date\": today,\n    \"sheetUrl\": sheet_url,\n    \"message\": message\n  }\n}]"
       },
       "id": "a1b2c3d4-0011-4000-8000-000000000011",
       "name": "Build Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1980, 0]
+      "position": [
+        1980,
+        0
+      ]
     },
     {
       "parameters": {
@@ -232,7 +271,10 @@
       "name": "Telegram: Daily Report",
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
-      "position": [2200, 0],
+      "position": [
+        2200,
+        0
+      ],
       "notes": "Sends daily lead count + sheet link to your Telegram",
       "credentials": {
         "telegramApi": {
@@ -250,8 +292,39 @@
       "name": "Webhook: Manual Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [0, 220],
+      "position": [
+        0,
+        220
+      ],
       "notes": "OpenClaw can hit this webhook to trigger a scan on demand"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3333/enrich/batch",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "leads",
+              "value": "={{ $input.all().map(i => ({ name: i.json.name, url: i.json.enrichUrl })) }}"
+            },
+            {
+              "name": "callbackUrl",
+              "value": "={{ $env.N8N_WEBHOOK_URL.split('/webhook/')[0] + '/webhook/enrich-complete' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "enrich-batch-request",
+      "name": "Enrichment: Submit Batch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1800,
+        220
+      ]
     }
   ],
   "connections": {
@@ -292,14 +365,14 @@
       "main": [
         [
           {
-            "node": "SerpApi Google Maps",
+            "node": "Serper Places API",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "SerpApi Google Maps": {
+    "Serper Places API": {
       "main": [
         [
           {
@@ -366,6 +439,17 @@
       ]
     },
     "Append to Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Enrichment: Submit Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrichment: Submit Batch": {
       "main": [
         [
           {
